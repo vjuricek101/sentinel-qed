@@ -2,7 +2,7 @@
 
 # Run the Streamlit GUI dashboard
 gui:
-	streamlit run app.py
+	python3 -m streamlit run app.py
 
 # Run the CLI terminal demo
 demo:
