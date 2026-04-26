@@ -17,10 +17,56 @@ will not affect a different region. If Core 0 has a stuck-at fault,
 Core 1 almost certainly does not.
 """
 
+import datetime
+import functools
+import json
 import multiprocessing
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
+
+# Global configuration flags for the decorator
+SAFETY_MODE = True
+DEFAULT_ORCHESTRATOR = None
+
+def get_default_orchestrator():
+    """Lazy load a global orchestrator instance to avoid recreating processes unnecessarily."""
+    global DEFAULT_ORCHESTRATOR
+    if DEFAULT_ORCHESTRATOR is None:
+        DEFAULT_ORCHESTRATOR = DualCoreOrchestrator(primary_core=0, shadow_core=1)
+    return DEFAULT_ORCHESTRATOR
+
+def sentinel_protect(timeout: float = 30.0):
+    """
+    Decorator that protects a function from Silent Data Corruption.
+    
+    If SAFETY_MODE is True: executes heavily protected dual-core QED validation.
+    If SAFETY_MODE is False: executes natively on the current core (zero performance tax).
+    """
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            if not SAFETY_MODE:
+                # FAST PATH: Run directly on the current thread/core
+                return func(*args, **kwargs)
+            
+            # PROTECTED PATH: Run heavily audited dual-core redundancy
+            orchestrator = get_default_orchestrator()
+            
+            result = orchestrator.run(
+                func=func, 
+                args=args, 
+                kwargs=kwargs, 
+                timeout=timeout
+            )
+            
+            if result.fault_detected:
+                return result.shadow_result
+            
+            return result.primary_result
+            
+        return wrapper
+    return decorator
 
 try:
     import psutil
@@ -42,7 +88,7 @@ class QEDResult:
     execution_time_ms: float = 0.0
 
 
-def _worker(core_id: int, func: Callable, args: tuple, result_queue: multiprocessing.Queue, injector=None):
+def _worker(core_id: int, func: Callable, args: tuple, kwargs: dict, result_queue: multiprocessing.Queue, injector=None):
     """
     Subprocess worker. Sets CPU affinity BEFORE executing — this is critical.
 
@@ -59,7 +105,7 @@ def _worker(core_id: int, func: Callable, args: tuple, result_queue: multiproces
                 # On Linux this succeeds and gives real physical isolation
                 pass
 
-        result = func(*args)
+        result = func(*args, **kwargs)
 
         if injector is not None:
             result = injector(result)
@@ -112,10 +158,61 @@ class DualCoreOrchestrator:
         self.detection_count: int = 0
         self.total_runs: int = 0
 
+    def dump_failure_snapshot(self, func: Callable, args: tuple, kwargs: dict, mismatches: list, r_primary: Any, r_shadow: Any):
+        """
+        Creates a 'Black Box' evidence log for chip manufacturers.
+        Fixes the 'No Trouble Found' (NTF) issue by capturing exact
+        software register state and hardware telemetry directly at the
+        moment of divergence.
+        """
+        snapshot = {
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            "workload": getattr(func, "__name__", str(func)),
+            "inputs": {"args": args, "kwargs": kwargs},
+            "software_register_state": {
+                "corrupted_fields": mismatches,
+                "raw_result_primary": str(r_primary) if r_primary is not None else "TIMEOUT",
+                "raw_result_shadow": str(r_shadow) if r_shadow is not None else "TIMEOUT",
+            },
+            "hardware_telemetry": {
+                "cpu_percent_per_core": [],
+                "core_frequency": [],
+                "core_temperatures": {}
+            }
+        }
+
+        if PSUTIL_AVAILABLE:
+            try:
+                snapshot["hardware_telemetry"]["cpu_percent_per_core"] = psutil.cpu_percent(interval=None, percpu=True)
+                freqs = psutil.cpu_freq(percpu=True)
+                if freqs:
+                    snapshot["hardware_telemetry"]["core_frequency"] = [
+                        {"current": getattr(f, 'current', None), "min": getattr(f, 'min', None), "max": getattr(f, 'max', None)}
+                        for f in freqs
+                    ]
+                
+                if hasattr(psutil, "sensors_temperatures"):
+                    temps = psutil.sensors_temperatures()
+                    snapshot["hardware_telemetry"]["core_temperatures"] = {
+                        k: [{"label": getattr(t, 'label', ''), "current": getattr(t, 'current', None)} for t in v]
+                        for k, v in temps.items()
+                    }
+            except Exception as e:
+                snapshot["hardware_telemetry"]["error"] = str(e)
+
+        filename = f"SDC_SNAPSHOT_{int(time.time())}.json"
+        try:
+            with open(filename, "w") as f:
+                json.dump(snapshot, f, indent=4)
+            print(f"⚠️ PROTECTED BY SENTINEL: Black box flight recorder dumped to {filename}")
+        except Exception:
+            print("⚠️ PROTECTED BY SENTINEL: Hardware fault mitigated. (Failed to write snapshot)")
+
     def run(
         self,
         func: Callable,
-        args: tuple,
+        args: tuple = (),
+        kwargs: dict = None,
         fault_injector=None,
         timeout: float = 30.0
     ) -> QEDResult:
@@ -125,6 +222,9 @@ class DualCoreOrchestrator:
         fault_injector is applied only to the primary core — it simulates
         a hardware defect localized to that silicon region.
         """
+        if kwargs is None:
+            kwargs = {}
+            
         self.total_runs += 1
         start = time.perf_counter()
 
@@ -132,11 +232,11 @@ class DualCoreOrchestrator:
 
         p_primary = multiprocessing.Process(
             target=_worker,
-            args=(self.primary_core, func, args, result_queue, fault_injector)
+            args=(self.primary_core, func, args, kwargs, result_queue, fault_injector)
         )
         p_shadow = multiprocessing.Process(
             target=_worker,
-            args=(self.shadow_core, func, args, result_queue, None)
+            args=(self.shadow_core, func, args, kwargs, result_queue, None)
         )
 
         p_primary.start()
@@ -163,6 +263,7 @@ class DualCoreOrchestrator:
 
         # Both processes must have returned
         if self.primary_core not in results or self.shadow_core not in results:
+            self.dump_failure_snapshot(func, args, kwargs, [("execution", "timeout", "timeout")], None, None)
             return QEDResult(
                 passed=False,
                 primary_result=None,
@@ -183,6 +284,7 @@ class DualCoreOrchestrator:
         if mismatches:
             self.detection_count += 1
             self.quarantined_cores.add(self.primary_core)
+            self.dump_failure_snapshot(func, args, kwargs, mismatches, r_primary, r_shadow)
             return QEDResult(
                 passed=False,
                 primary_result=r_primary,

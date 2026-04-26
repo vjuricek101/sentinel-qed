@@ -64,3 +64,34 @@ def get_active_injector():
     if FAULT_TYPE == "stuck_at":
         return simulate_stuck_at_fault
     return simulate_resistive_fault
+
+
+# ── Unconditional variants ─────────────────────────────────────────────────
+# On macOS, multiprocessing uses 'spawn' (not 'fork'), so child processes
+# import the module fresh — they never inherit the parent's FAULT_ACTIVE=True.
+# These functions always apply the corruption, bypassing the global flag.
+# app.py uses these when the user has activated fault injection.
+
+def _apply_stuck_at(result):
+    """Unconditional stuck-at-1 fault — always corrupts, no flag check."""
+    corrupted = result.model_copy()
+    bit_flip_value = 1 << 7  # bit 7 = 128
+    corrupted.total_cents = result.total_cents ^ bit_flip_value
+    corrupted.interest_cents = corrupted.total_cents - result.principal_cents
+    return corrupted
+
+
+def _apply_resistive(result):
+    """Unconditional resistive fault — always corrupts, no flag check."""
+    corrupted = result.model_copy()
+    corrupted.total_cents = result.total_cents + 10000  # $100.00 off
+    corrupted.interest_cents = corrupted.total_cents - result.principal_cents
+    return corrupted
+
+
+def get_unconditional_injector(fault_type: str = None):
+    """Returns an injector that always applies the fault (spawn-safe)."""
+    t = fault_type or FAULT_TYPE
+    if t == "stuck_at":
+        return _apply_stuck_at
+    return _apply_resistive

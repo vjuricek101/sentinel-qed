@@ -75,7 +75,7 @@ def scenario_2_silent_failure(orchestrator: DualCoreOrchestrator):
     )
 
     fault_injector.FAULT_ACTIVE = True
-    injector = fault_injector.get_active_injector()
+    injector = fault_injector.get_unconditional_injector()
 
     reporter.compute_start("calculate_portfolio_interest", WORKLOAD_ARGS)
     time.sleep(0.5)
@@ -86,7 +86,7 @@ def scenario_2_silent_failure(orchestrator: DualCoreOrchestrator):
     import orchestrator as orch_module
     p = multiprocessing.Process(
         target=orch_module._worker,
-        args=(0, calculate_portfolio_interest, WORKLOAD_ARGS, result_queue, injector)
+        args=(0, calculate_portfolio_interest, WORKLOAD_ARGS, {}, result_queue, injector)
     )
     p.start()
     p.join(timeout=15)
@@ -114,7 +114,7 @@ def scenario_3_sentinel_protected(orchestrator: DualCoreOrchestrator):
     )
 
     fault_injector.FAULT_ACTIVE = True
-    injector = fault_injector.get_active_injector()
+    injector = fault_injector.get_unconditional_injector()
 
     reporter.compute_start("calculate_portfolio_interest", WORKLOAD_ARGS)
     time.sleep(0.5)
