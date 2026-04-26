@@ -87,8 +87,8 @@ making any disagreement a meaningful fault signal.
 
 **Field-level QED comparison**
 Pydantic models enable per-field comparison — we can identify exactly which
-value was corrupted, providing the diagnosis capability the lecture identifies
-as missing from current system-level tests.
+value was corrupted, providing the diagnosis capability that's missing from
+current system-level tests.
 
 ---
 

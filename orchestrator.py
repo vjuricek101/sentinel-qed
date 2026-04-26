@@ -5,15 +5,16 @@ Implements the EDDI-V (Error Detection by Duplicated Instructions) transform
 at the OS process level. Each computation runs in a separate subprocess pinned
 to a specific physical CPU core via cpu_affinity.
 
-Connection to lecture:
-  CASP (Concurrent Autonomous Stored Patterns) moves testing from the factory
-  floor to the operating system. This module is the software-layer equivalent:
-  we use OS primitives (cpu_affinity) to achieve the same physical isolation
-  that CASP achieves with hardware scan chains.
+CASP (Concurrent Autonomous Stored Patterns) moves testing from the factory
+floor to the operating system. 
 
-  Professor Mitra: "Defects are localized. A defect on one region of the chip
-  will not affect a different region." — This is our core assumption. If Core 0
-  has a stuck-at fault, Core 1 almost certainly does not.
+This module is the software-layer equivalent: we use OS primitives 
+(cpu_affinity) to achieve the same physical isolation
+that CASP achieves with hardware scan chains.
+
+Defects are localized. A defect on one region of the chip
+will not affect a different region. If Core 0 has a stuck-at fault,
+Core 1 almost certainly does not.
 """
 
 import multiprocessing
@@ -76,7 +77,7 @@ def _compare_results(r0, r1) -> list:
     Returns list of mismatched field names. Empty list = pass.
     Uses field-level comparison so we can pinpoint exactly which
     register or value was corrupted — this is the 'diagnosis' capability
-    the lecture identifies as missing from current system-level tests.
+    as missing from current system-level tests.
     """
     mismatches = []
 
@@ -102,10 +103,6 @@ class DualCoreOrchestrator:
     If the primary core produces a different result than the shadow core,
     a hardware fault is assumed on the primary. The primary is quarantined
     and the shadow result is returned as the trusted output.
-
-    This directly implements the 'eventual failure detection' tier from
-    the lecture's resilient systems framework — low cost, targets permanent
-    failures, software-only deployment.
     """
 
     def __init__(self, primary_core: int = 0, shadow_core: int = 1):

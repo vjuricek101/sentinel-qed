@@ -11,13 +11,11 @@ Run:
   python main.py           # all three scenarios
   python main.py --scenario 2   # specific scenario
 
-Connection to lecture (Mitra, Stanford EE272):
-  This demo operationalizes the gap between:
-  - Current state: "system-level tests detect failure but cannot diagnose it"
-  - Target state:  "concurrent autonomous check at the compute layer"
+This demo operationalizes the gap between:
+- Current state: "system-level tests detect failure but cannot diagnose it"
+- Target state:  "concurrent autonomous check at the compute layer"
 
-  We fill exactly the slot the lecture identifies as empty:
-  software-layer compute protection, deployable today without hardware changes.
+We fill software-layer compute protection, deployable today without hardware changes.
 """
 
 import argparse

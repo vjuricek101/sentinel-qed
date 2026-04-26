@@ -1,16 +1,12 @@
 """
 fault_injector.py — Simulates localized silicon defects for Sentinel-QED demo.
 
-Models two fault types from the lecture:
+Models two fault types:
   - Stuck-at fault: a node permanently fixed to 0 or 1 (flips a bit in output)
   - Resistive fault: output drifts by a small amount (models weak transistor)
 
 In the demo, this injector is applied ONLY to Core 0 (the primary).
 Core 1 (shadow) always runs clean. A mismatch = hardware fault detected.
-
-Connection to lecture:
-  Professor Mitra: "A combinational circuit with a stuck-at fault will produce
-  incorrect output for specific input combinations — often silently."
 """
 
 import copy
